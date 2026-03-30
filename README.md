@@ -21,11 +21,11 @@ When a user creates a `.sudo` archive, the data flows through the following 6 st
 
 ## Team SUDO (FAF-252) & Responsibilities
 * **Danu Chira** - Huffman Coding (Entropy optimization & Tree generation)
-* **[Member 2 Name]** - LZ77 (Sliding window pattern matching)
-* **[Member 3 Name]** - BWT (Burrows-Wheeler Transform)
-* **[Member 4 Name]** - MTF (Move-to-Front encoding)
-* **[Member 5 Name]** - RLE (Run-Length Encoding)
-* **[Member 6 Name]** - Archiver Container (File headers, I/O streams, Checksums)
+* **Marius Șaganean** - LZ77 (Sliding window pattern matching)
+* **Dragoș Lupșa** - BWT (Burrows-Wheeler Transform)
+* **Chirill Donos** - MTF (Move-to-Front encoding)
+* **Călin Tarlev** - RLE (Run-Length Encoding)
+* **Ion Trofim** - Archiver Container (File headers, I/O streams, Checksums)
 
 ## Build & Run
 
