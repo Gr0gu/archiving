@@ -1,14 +1,16 @@
-name: C/C++ CI Build
+name: Build and Release
 
 on:
   push:
-    branches: [ "main", "master" ]
-  pull_request:
-    branches: [ "main", "master" ]
+    tags:
+      - 'v*'
 
 jobs:
-  build:
+  release:
     runs-on: ubuntu-latest
+    
+    permissions:
+      contents: write 
 
     steps:
     - name: Checkout code
@@ -20,7 +22,12 @@ jobs:
     - name: Verify executable exists
       run: |
         if [ ! -f sudo_archiver ]; then
-          echo "Build failed: sudo_archiver executable not found!"
+          echo "Build failed: executable not found!"
           exit 1
         fi
-        echo "Build successful."
+
+    - name: Publish to GitHub Releases
+      uses: softprops/action-gh-release@v2
+      with:
+        files: sudo_archiver
+        generate_release_notes: true
