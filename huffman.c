@@ -1,5 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include "pipeline.h"
 
 typedef struct Node Node;
 
@@ -152,51 +154,252 @@ void freeMinHeap(MinHeap* minHeap) {
   free(minHeap);
 }
 
-void printArray(int* array, int n) {
-  for (int i = 0; i < n; i++)
-    printf("%d ", array[i]);
+typedef struct {
+  uint8_t bits[256];
+  uint16_t length;
+} HuffCode;
 
-  printf("\n");
-}
-
-void printCodes(Node* root, int* array, int top) {
-  if (root->left) {
-    array[top] = 0;
-    printCodes(root->left, array, top + 1);
-  }
-
-  if (root->right) {
-    array[top] = 1;
-    printCodes(root->right, array, top + 1);
+static void buildCodeTable(Node* root,
+                           uint8_t* path,
+                           uint16_t depth,
+                           HuffCode codes[256]) {
+  if (!root) {
+    return;
   }
 
   if (isLeaf(root)) {
-    printf("%c: ", root->data);
-    printArray(array, top);
+    uint8_t sym = (uint8_t)root->data;
+    if (depth == 0) {
+      // Single-symbol input edge case.
+      codes[sym].bits[0] = 0;
+      codes[sym].length = 1;
+    } else {
+      memcpy(codes[sym].bits, path, depth);
+      codes[sym].length = depth;
+    }
+    return;
   }
+
+  path[depth] = 0;
+  buildCodeTable(root->left, path, depth + 1, codes);
+
+  path[depth] = 1;
+  buildCodeTable(root->right, path, depth + 1, codes);
 }
 
-void HuffmanCodes(char* data, int* frequences, int size) {
+static void write_u32(uint8_t* dst, uint32_t v) {
+  memcpy(dst, &v, sizeof(v));
+}
+
+static uint32_t read_u32(const uint8_t* src) {
+  uint32_t v;
+  memcpy(&v, src, sizeof(v));
+  return v;
+}
+
+uint8_t* apply_huffman(const uint8_t* input, size_t len, size_t* out_len) {
+  if (!out_len) {
+    return NULL;
+  }
+
+  *out_len = 0;
+
+  // Format:
+  // [u32 original_len]
+  // [256 * u32 frequency table]
+  // [u32 bit_count]
+  // [bitstream bytes]
+  const size_t header_size =
+      sizeof(uint32_t) + (256 * sizeof(uint32_t)) + sizeof(uint32_t);
+
+  uint32_t freq_table[256] = {0};
+  for (size_t i = 0; i < len; i++) {
+    freq_table[input[i]]++;
+  }
+
+  if (len == 0) {
+    uint8_t* out = (uint8_t*)calloc(1, header_size);
+    if (!out) {
+      return NULL;
+    }
+
+    write_u32(out, 0);
+    for (int i = 0; i < 256; i++) {
+      write_u32(out + sizeof(uint32_t) + i * sizeof(uint32_t), 0);
+    }
+    write_u32(out + sizeof(uint32_t) + 256 * sizeof(uint32_t), 0);
+
+    *out_len = header_size;
+    return out;
+  }
+
+  // Build compact symbol/frequency arrays for existing heap API.
+  char symbols[256];
+  int frequencies[256];
+  int unique = 0;
+  for (int i = 0; i < 256; i++) {
+    if (freq_table[i] > 0) {
+      symbols[unique] = (char)i;
+      frequencies[unique] = (int)freq_table[i];
+      unique++;
+    }
+  }
+
   MinHeap* minHeap = NULL;
+  Node* root = buildHuffmanTree(symbols, frequencies, unique, &minHeap);
 
-  Node* root = buildHuffmanTree(data, frequences, size, &minHeap);
+  HuffCode codes[256] = {0};
+  uint8_t path[256] = {0};
+  buildCodeTable(root, path, 0, codes);
 
-  int* array = (int*)malloc(size * sizeof(int));
-  int top = 0;
-  printCodes(root, array, top);
+  size_t total_bits = 0;
+  for (int i = 0; i < 256; i++) {
+    if (freq_table[i] > 0) {
+      total_bits += (size_t)freq_table[i] * (size_t)codes[i].length;
+    }
+  }
 
-  free(array);
+  size_t bitstream_bytes = (total_bits + 7) / 8;
+  size_t total_size = header_size + bitstream_bytes;
+
+  uint8_t* out = (uint8_t*)calloc(1, total_size);
+  if (!out) {
+    freeHuffmanTree(root);
+    freeMinHeap(minHeap);
+    return NULL;
+  }
+
+  // Write header
+  write_u32(out, (uint32_t)len);
+  for (int i = 0; i < 256; i++) {
+    write_u32(out + sizeof(uint32_t) + i * sizeof(uint32_t), freq_table[i]);
+  }
+  write_u32(out + sizeof(uint32_t) + 256 * sizeof(uint32_t),
+            (uint32_t)total_bits);
+
+  // Write bitstream
+  uint8_t* bitstream = out + header_size;
+  size_t bit_pos = 0;
+  for (size_t i = 0; i < len; i++) {
+    const HuffCode* c = &codes[input[i]];
+    for (uint16_t b = 0; b < c->length; b++) {
+      if (c->bits[b]) {
+        bitstream[bit_pos / 8] |= (uint8_t)(1u << (7 - (bit_pos % 8)));
+      }
+      bit_pos++;
+    }
+  }
+
+  *out_len = total_size;
+
   freeHuffmanTree(root);
   freeMinHeap(minHeap);
+  return out;
 }
 
-int main() {
-  char arr[] = {'a', 'b', 'c', 'd', 'e', 'f'};
-  int freq[] = {5, 9, 12, 13, 16, 45};
+uint8_t* inverse_huffman(const uint8_t* input, size_t len, size_t* out_len) {
+  if (!input || !out_len) {
+    return NULL;
+  }
 
-  int size = sizeof(arr) / sizeof(arr[0]);
+  *out_len = 0;
 
-  HuffmanCodes(arr, freq, size);
+  const size_t header_size =
+      sizeof(uint32_t) + (256 * sizeof(uint32_t)) + sizeof(uint32_t);
+  if (len < header_size) {
+    return NULL;
+  }
 
-  return 0;
+  uint32_t original_len = read_u32(input);
+
+  uint32_t freq_table[256];
+  for (int i = 0; i < 256; i++) {
+    freq_table[i] = read_u32(input + sizeof(uint32_t) + i * sizeof(uint32_t));
+  }
+
+  uint32_t total_bits =
+      read_u32(input + sizeof(uint32_t) + 256 * sizeof(uint32_t));
+
+  const uint8_t* bitstream = input + header_size;
+  size_t bitstream_bytes = (size_t)(len - header_size);
+  if (((size_t)total_bits + 7) / 8 > bitstream_bytes) {
+    return NULL;
+  }
+
+  uint8_t* out = NULL;
+  if (original_len == 0) {
+    out = (uint8_t*)malloc(1);
+    if (!out)
+      return NULL;
+    *out_len = 0;
+    return out;
+  }
+
+  out = (uint8_t*)malloc(original_len);
+  if (!out) {
+    return NULL;
+  }
+
+  char symbols[256];
+  int frequencies[256];
+  int unique = 0;
+  for (int i = 0; i < 256; i++) {
+    if (freq_table[i] > 0) {
+      symbols[unique] = (char)i;
+      frequencies[unique] = (int)freq_table[i];
+      unique++;
+    }
+  }
+
+  if (unique == 0) {
+    free(out);
+    return NULL;
+  }
+
+  MinHeap* minHeap = NULL;
+  Node* root = buildHuffmanTree(symbols, frequencies, unique, &minHeap);
+
+  // Single-symbol edge case: no traversal needed.
+  if (isLeaf(root)) {
+    memset(out, (uint8_t)root->data, original_len);
+    *out_len = original_len;
+    freeHuffmanTree(root);
+    freeMinHeap(minHeap);
+    return out;
+  }
+
+  size_t out_pos = 0;
+  Node* cur = root;
+
+  for (uint32_t bit_pos = 0; bit_pos < total_bits && out_pos < original_len;
+       bit_pos++) {
+    uint8_t byte = bitstream[bit_pos / 8];
+    uint8_t bit = (byte >> (7 - (bit_pos % 8))) & 1u;
+
+    cur = bit ? cur->right : cur->left;
+    if (!cur) {
+      free(out);
+      freeHuffmanTree(root);
+      freeMinHeap(minHeap);
+      return NULL;
+    }
+
+    if (isLeaf(cur)) {
+      out[out_pos++] = (uint8_t)cur->data;
+      cur = root;
+    }
+  }
+
+  if (out_pos != original_len) {
+    free(out);
+    freeHuffmanTree(root);
+    freeMinHeap(minHeap);
+    return NULL;
+  }
+
+  *out_len = out_pos;
+
+  freeHuffmanTree(root);
+  freeMinHeap(minHeap);
+  return out;
 }

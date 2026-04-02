@@ -17,6 +17,7 @@
 #include <string.h>
 #include <sys/stat.h> /* stat()     */
 #include <sys/types.h>
+#include "pipeline.h"
 
 /* Magic number at the start of every .arc file */
 #define ARC_MAGIC "ARC\0"
@@ -96,9 +97,7 @@ static long copy_bytes(FILE* dst, FILE* src, uint64_t n) {
  *   2. For each input file, write its entry header then stream its data.
  *   3. Seek back and rewrite the header with the real file_count.
  */
-static int arc_create(const char* archive_path,
-                      int file_argc,
-                      char** file_argv) {
+int arc_create(const char* archive_path, char** file_argv, int file_argc) {
   FILE* arc = fopen(archive_path, "wb");
   if (!arc)
     die(archive_path);
@@ -178,52 +177,51 @@ static int arc_create(const char* archive_path,
 /* List                                                                */
 /* ------------------------------------------------------------------ */
 
-static int arc_list(const char* archive_path) {
-  FILE* arc = fopen(archive_path, "rb");
-  if (!arc)
-    die(archive_path);
+// static int arc_list(const char* archive_path) {
+//   FILE* arc = fopen(archive_path, "rb");
+//   if (!arc)
+//     die(archive_path);
 
-  ArcHeader hdr;
-  if (fread(&hdr, sizeof(hdr), 1, arc) != 1)
-    die("read header");
+//   ArcHeader hdr;
+//   if (fread(&hdr, sizeof(hdr), 1, arc) != 1)
+//     die("read header");
 
-  if (memcmp(hdr.magic, ARC_MAGIC, ARC_MAGIC_LEN) != 0) {
-    fprintf(stderr, "error: '%s' is not a valid .arc archive\n", archive_path);
-    fclose(arc);
-    return 1;
-  }
+//   if (memcmp(hdr.magic, ARC_MAGIC, ARC_MAGIC_LEN) != 0) {
+//     fprintf(stderr, "error: '%s' is not a valid .arc archive\n",
+//     archive_path); fclose(arc); return 1;
+//   }
 
-  printf("Archive: %s\n", archive_path);
-  printf("%-40s  %12s\n", "Filename", "Size");
-  printf("%-40s  %12s\n", "--------", "----");
+//   printf("Archive: %s\n", archive_path);
+//   printf("%-40s  %12s\n", "Filename", "Size");
+//   printf("%-40s  %12s\n", "--------", "----");
 
-  for (uint32_t i = 0; i < hdr.file_count; i++) {
-    ArcEntry entry;
-    if (fread(&entry, sizeof(entry), 1, arc) != 1) {
-      fprintf(stderr, "error: truncated archive at entry %u\n", i);
-      fclose(arc);
-      return 1;
-    }
-    printf("%-40s  %12llu\n", entry.filename,
-           (unsigned long long)entry.original_size);
+//   for (uint32_t i = 0; i < hdr.file_count; i++) {
+//     ArcEntry entry;
+//     if (fread(&entry, sizeof(entry), 1, arc) != 1) {
+//       fprintf(stderr, "error: truncated archive at entry %u\n", i);
+//       fclose(arc);
+//       return 1;
+//     }
+//     printf("%-40s  %12llu\n", entry.filename,
+//            (unsigned long long)entry.original_size);
 
-    /* Skip past the data to reach the next header */
-    if (fseeko(arc, (off_t)entry.data_size, SEEK_CUR) != 0) {
-      fprintf(stderr, "error: seek failed at entry %u\n", i);
-      fclose(arc);
-      return 1;
-    }
-  }
+//     /* Skip past the data to reach the next header */
+//     if (fseeko(arc, (off_t)entry.data_size, SEEK_CUR) != 0) {
+//       fprintf(stderr, "error: seek failed at entry %u\n", i);
+//       fclose(arc);
+//       return 1;
+//     }
+//   }
 
-  fclose(arc);
-  return 0;
-}
+//   fclose(arc);
+//   return 0;
+// }
 
 /* ------------------------------------------------------------------ */
 /* Extract                                                             */
 /* ------------------------------------------------------------------ */
 
-static int arc_extract(const char* archive_path) {
+int arc_extract(const char* archive_path) {
   FILE* arc = fopen(archive_path, "rb");
   if (!arc)
     die(archive_path);
@@ -280,40 +278,5 @@ static int arc_extract(const char* archive_path) {
   }
 
   fclose(arc);
-  return 0;
-}
-
-/* ------------------------------------------------------------------ */
-/* Entry point                                                         */
-/* ------------------------------------------------------------------ */
-
-static void usage(const char* prog) {
-  fprintf(stderr,
-          "Usage:\n"
-          "  %s c <archive.arc> <file1> [file2 ...]   create archive\n"
-          "  %s x <archive.arc>                        extract archive\n"
-          "  %s l <archive.arc>                        list contents\n",
-          prog, prog, prog);
-  exit(EXIT_FAILURE);
-}
-
-int main(int argc, char* argv[]) {
-  if (argc < 3)
-    usage(argv[0]);
-
-  const char* cmd = argv[1];
-  const char* archive_path = argv[2];
-
-  if (strcmp(cmd, "c") == 0) {
-    if (argc < 4)
-      usage(argv[0]);
-    return arc_create(archive_path, argc - 3, argv + 3);
-  } else if (strcmp(cmd, "x") == 0) {
-    return arc_extract(archive_path);
-  } else if (strcmp(cmd, "l") == 0) {
-    return arc_list(archive_path);
-  } else {
-    usage(argv[0]);
-  }
   return 0;
 }
