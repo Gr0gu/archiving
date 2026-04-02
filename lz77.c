@@ -62,7 +62,7 @@ uint8_t* apply_lz77(const uint8_t* input, size_t len, size_t* out_len) {
   free(head);
   free(prev);
   *out_len = out_pos;
-  return (int8_t*)output;
+  return output;
 }
 
 uint8_t* inverse_lz77(const uint8_t* input, size_t len, size_t* out_len) {
