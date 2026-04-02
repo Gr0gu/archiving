@@ -1,0 +1,26 @@
+name: C/C++ CI Build
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Compile the project
+      run: make
+
+    - name: Verify executable exists
+      run: |
+        if [ ! -f sudo_archiver ]; then
+          echo "Build failed: sudo_archiver executable not found!"
+          exit 1
+        fi
+        echo "Build successful."
