@@ -136,7 +136,7 @@ int compress_file_by_chunks(const char* input_filename,
     fwrite(huff_out,  1,          huff_len, out_file);
     free_buffer(huff_out);
 
-    printf("  chunk %llu: %zu → %zu bytes (%.1f%%)\n",
+    printf("  chunk %llu: %zu -> %zu bytes (%.1f%%)\n",
            (unsigned long long)num_chunks,
            bytes_read, huff_len,
            100.0 * (double)huff_len / (double)bytes_read);
@@ -315,7 +315,7 @@ int main(int argc, char* argv[]) {
       return EXIT_FAILURE;
     }
 
-    printf("2. Compressing bundle (BWT → MTF → RLE → Huffman)...\n");
+    printf("2. Compressing bundle (BWT -> MTF -> RLE -> Huffman)...\n");
     if (compress_file_by_chunks(temp_arc, target_sudo) != 0) {
       fprintf(stderr, "Error: compression pipeline failed.\n");
       remove(temp_arc);
@@ -325,12 +325,12 @@ int main(int argc, char* argv[]) {
     printf("3. Cleaning up...\n");
     remove(temp_arc);
 
-    printf("\n✅ Success: '%s' created.\n", target_sudo);
+    printf("\n Success: '%s' created.\n", target_sudo);
 
   /* ==================== EXTRACTION (-x) ==================== */
   } else if (strcmp(flag, "-x") == 0) {
 
-    printf("1. Decompressing '%s' (Huffman → RLE → MTF → BWT)...\n",
+    printf("1. Decompressing '%s' (Huffman -> RLE -> MTF -> BWT)...\n",
            target_sudo);
     if (decompress_file_by_chunks(target_sudo, temp_arc) != 0) {
       fprintf(stderr, "Error: decompression pipeline failed.\n");
@@ -347,7 +347,7 @@ int main(int argc, char* argv[]) {
     printf("3. Cleaning up...\n");
     remove(temp_arc);
 
-    printf("\n✅ Success: files extracted from '%s'.\n", target_sudo);
+    printf("\n Success: files extracted from '%s'.\n", target_sudo);
 
   /* ==================== UNKNOWN FLAG ==================== */
   } else {
