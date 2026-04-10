@@ -1,130 +1,104 @@
-/*
- * bwt.c — Burrows-Wheeler Transform (forward and inverse).
- *
- * Key optimisation over the naive approach:
- *   Instead of comparing rotations via a character loop with modular
- *   arithmetic  (ia + k) % len,  we build a "doubled" buffer  [input | input]
- *   of length 2*len.  Rotation i then occupies the contiguous slice
- *   doubled[i .. i+len-1], so comparisons reduce to a single memcmp call.
- *   memcmp is SIMD-optimised by every modern libc, making this substantially
- *   faster than the hand-written byte loop for typical chunk sizes.
- */
-
 #include <stdlib.h>
 #include <string.h>
-#include "pipeline.h"
+#include <stdint.h>
 
-/* Used by the qsort comparator — not thread-safe, but we are single-threaded. */
-static const uint8_t* g_doubled = NULL;
-static size_t         g_len     = 0;
-
-static int bwt_rotation_compare(const void* a, const void* b) {
-  size_t ia = *(const size_t*)a;
-  size_t ib = *(const size_t*)b;
-  return memcmp(g_doubled + ia, g_doubled + ib, g_len);
-}
-
-uint8_t* apply_bwt(const uint8_t* input,
-                   size_t len,
-                   size_t* out_primary_index) {
-  if (!out_primary_index)
-    return NULL;
-
-  *out_primary_index = 0;
-
-  if (len == 0)
-    return NULL;
-
-  /*
-   * doubled[0..2*len-1] = input ++ input
-   * Rotation starting at index i is doubled[i..i+len-1] — no wrapping needed.
-   */
-  uint8_t* doubled = malloc(2 * len);
-  if (!doubled)
-    return NULL;
-  memcpy(doubled,       input, len);
-  memcpy(doubled + len, input, len);
-
-  size_t* order = malloc(len * sizeof(size_t));
-  if (!order) {
-    free(doubled);
-    return NULL;
-  }
-
-  for (size_t i = 0; i < len; ++i)
-    order[i] = i;
-
-  g_doubled = doubled;
-  g_len     = len;
-  qsort(order, len, sizeof(size_t), bwt_rotation_compare);
-  g_doubled = NULL; /* clear after use */
-
-  uint8_t* output = malloc(len);
-  if (!output) {
-    free(doubled);
-    free(order);
-    return NULL;
-  }
-
-  for (size_t i = 0; i < len; ++i) {
-    if (order[i] == 0)
-      *out_primary_index = i;
-    /* Last character of rotation order[i] is the character just before it. */
-    output[i] = input[order[i] > 0 ? order[i] - 1 : len - 1];
-  }
-
-  free(doubled);
-  free(order);
-  return output;
-}
-
-/*
- * inverse_bwt — standard LF-mapping reconstruction.
- *
- * Given the last column L (= input) and the primary index, rebuilds the
- * original string in O(n) time using rank/next arrays.
+/* * Context structure to pass data to the comparator without using 
+ * thread-unsafe global variables. 
  */
+typedef struct {
+    const uint8_t* doubled;
+    size_t len;
+} BWTContext;
+
+/* * Thread-safe comparator. 
+ * Note: The argument order for qsort_r varies between macOS/BSD and GNU/Linux.
+ * This version uses the macOS/BSD/ARM64 standard.
+ */
+static int bwt_compare_safe(void* thunk, const void* a, const void* b) {
+    BWTContext* ctx = (BWTContext*)thunk;
+    uint32_t ia = *(const uint32_t*)a;
+    uint32_t ib = *(const uint32_t*)b;
+    
+    /* Using memcmp on the doubled buffer is O(n) but heavily SIMD optimized */
+    return memcmp(ctx->doubled + ia, ctx->doubled + ib, ctx->len);
+}
+
+uint8_t* apply_bwt(const uint8_t* input, size_t len, size_t* out_primary_index) {
+    if (!input || len == 0 || !out_primary_index) return NULL;
+
+    /* 1. Allocate memory for doubled buffer, suffix array, and output */
+    uint8_t* doubled = malloc(2 * len);
+    uint32_t* sa = malloc(len * sizeof(uint32_t));
+    uint8_t* output = malloc(len);
+
+    if (!doubled || !sa || !output) {
+        free(doubled); free(sa); free(output);
+        return NULL;
+    }
+
+    /* 2. Create the [input][input] buffer to eliminate modular arithmetic */
+    memcpy(doubled, input, len);
+    memcpy(doubled + len, input, len);
+
+    /* 3. Initialize indices for the suffix array */
+    for (uint32_t i = 0; i < (uint32_t)len; i++) {
+        sa[i] = i;
+    }
+
+    /* 4. Sort indices using the thread-safe qsort_r */
+    BWTContext ctx = { doubled, len };
+    qsort_r(sa, len, sizeof(uint32_t), &ctx, bwt_compare_safe);
+
+    /* 5. Construct the BWT output from the sorted suffix array */
+    for (size_t i = 0; i < len; i++) {
+        if (sa[i] == 0) {
+            *out_primary_index = i;
+            output[i] = input[len - 1];
+        } else {
+            output[i] = input[sa[i] - 1];
+        }
+    }
+
+    free(doubled);
+    free(sa);
+    return output;
+}
+
 uint8_t* inverse_bwt(const uint8_t* input, size_t len, size_t primary_index) {
-  if (len == 0 || primary_index >= len)
-    return NULL;
+    if (!input || len == 0 || primary_index >= len) return NULL;
 
-  uint8_t* output = malloc(len);
-  size_t*  rank   = malloc(len * sizeof(size_t));
-  size_t*  next   = malloc(len * sizeof(size_t));
+    uint8_t* output = malloc(len);
+    uint32_t* next = malloc(len * sizeof(uint32_t));
+    if (!output || !next) {
+        free(output); free(next);
+        return NULL;
+    }
 
-  if (!output || !rank || !next) {
-    free(output);
-    free(rank);
+    /* LF-mapping reconstruction */
+    size_t buckets[257] = {0};
+
+    /* Pass 1: Frequency count */
+    for (size_t i = 0; i < len; i++) {
+        buckets[input[i] + 1]++;
+    }
+
+    /* Pass 2: Cumulative offsets */
+    for (int i = 0; i < 256; i++) {
+        buckets[i + 1] += buckets[i];
+    }
+
+    /* Pass 3: Threading the next array */
+    for (size_t i = 0; i < len; i++) {
+        next[buckets[input[i]]++] = (uint32_t)i;
+    }
+
+    /* Pass 4: Walk the mapping to reconstruct original bytes */
+    uint32_t curr = next[primary_index];
+    for (size_t i = 0; i < len; i++) {
+        output[i] = input[curr];
+        curr = next[curr];
+    }
+
     free(next);
-    return NULL;
-  }
-
-  /* Count occurrences and assign per-symbol ranks. */
-  size_t counts[256] = {0};
-  for (size_t i = 0; i < len; ++i) {
-    rank[i] = counts[input[i]]++;
-  }
-
-  /* Starting position of each symbol in the sorted (first) column. */
-  size_t starts[256] = {0};
-  size_t total = 0;
-  for (int c = 0; c < 256; ++c) {
-    starts[c] = total;
-    total += counts[c];
-  }
-
-  /* next[i] = row in the sorted matrix that follows row i. */
-  for (size_t i = 0; i < len; ++i)
-    next[i] = starts[input[i]] + rank[i];
-
-  /* Walk the LF-mapping backwards to reconstruct the original string. */
-  size_t row = primary_index;
-  for (size_t i = len; i > 0; --i) {
-    output[i - 1] = input[row];
-    row = next[row];
-  }
-
-  free(rank);
-  free(next);
-  return output;
+    return output;
 }
