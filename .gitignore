@@ -53,3 +53,8 @@ dkms.conf
 
 # debug information files
 *.dwo
+
+# Project build artifacts
+sudo_archiver
+*.arc
+*.sudo
