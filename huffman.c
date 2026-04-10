@@ -1,18 +1,5 @@
 /*
  * huffman.c — Huffman entropy coding (encode + decode).
- *
- * Improvements over original:
- *   - Node.data is now uint8_t (was char) — eliminates sign-extension bugs
- *     for byte values 128-255 that were previously masked by casts.
- *   - Internal APIs use uint8_t* / uint32_t* instead of char* / int* —
- *     types match the actual domain (byte symbols, non-negative frequencies).
- *   - insertNode guards against writing past the array end.
- *
- * Output format per chunk:
- *   [u32 original_len]
- *   [256 × u32 frequency table]
- *   [u32 total_bits]
- *   [bitstream — ceil(total_bits/8) bytes, MSB-first]
  */
 
 #include <stdio.h>
