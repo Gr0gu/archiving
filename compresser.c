@@ -573,7 +573,7 @@ int main(int argc, char* argv[]) {
   const char* target_sudo = NULL;
 
   /* At most argc-2 non-flag arguments (mode consumes argv[1]). */
-  char** file_buf    = malloc((size_t)(argc + 1) * sizeof(char*));
+  char** file_buf    = malloc((size_t)(argc - 1) * sizeof(char*));
   char** input_files = file_buf;
   int    num_files   = 0;
 
