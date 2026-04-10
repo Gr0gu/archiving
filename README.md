@@ -35,4 +35,4 @@ When a user creates a `.sudo` archive, the data flows through the following 6 st
 
 ### Compilation
 ```bash
-make all
+./compile.sh
